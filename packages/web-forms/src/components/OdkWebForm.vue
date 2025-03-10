@@ -210,7 +210,8 @@ watchEffect(() => {
 					<div class="form-questions">
 						<div class="flex flex-column gap-2">
 							<QuestionList v-if="!stepperLayout" :nodes="odkForm.currentState.children" />
-							<QuestionStepper v-if="stepperLayout" :nodes="odkForm.currentState.children" @endOfForm="showSendButton=true" />
+							<!-- Note that QuestionStepper has the 'Send' button integrated instead of using the button below -->
+							<QuestionStepper v-if="stepperLayout" :nodes="odkForm.currentState.children" @sendFormFromStepper="handleSubmit()" />
 						</div>
 					</div>
 				</template>
@@ -222,7 +223,7 @@ watchEffect(() => {
 			</div>
 		</div>
 
-		<div class="powered-by-wrapper">
+		<div v-if="showSendButton" class="powered-by-wrapper">
 			<a class="anchor" href="https://getodk.org" target="_blank">
 				<span class="caption">Powered by</span>
 				<img
