@@ -1,16 +1,24 @@
 <script setup lang="ts">
+import type { FormStateSuccessResult } from '@/lib/init/FormState.ts';
+import { initializeFormState } from '@/lib/init/initializeFormState.ts';
+import type { EditInstanceOptions } from '@/lib/init/loadFormState';
+import { loadFormState } from '@/lib/init/loadFormState';
+import { updateSubmittedFormState } from '@/lib/init/updateSubmittedFormState.ts';
 import type {
-	ChunkedSubmissionResult,
+	HostSubmissionResultCallback,
+	OptionalAwaitableHostSubmissionResult,
+} from '@/lib/submission/HostSubmissionResultCallback.ts';
+import type {
+	ChunkedInstancePayload,
+	FetchFormAttachment,
 	MissingResourceBehavior,
-	MonolithicSubmissionResult,
+	MonolithicInstancePayload,
 } from '@getodk/xforms-engine';
-import { initializeForm, type FetchFormAttachment, type RootNode } from '@getodk/xforms-engine';
 import Button from 'primevue/button';
 import Card from 'primevue/card';
-import PrimeMessage from 'primevue/message';
+import Message from 'primevue/message';
 import type { ComponentPublicInstance } from 'vue';
-import { computed, getCurrentInstance, provide, reactive, ref, watchEffect } from 'vue';
-import { FormInitializationError } from '../lib/error/FormInitializationError.ts';
+import { computed, getCurrentInstance, provide, ref, watchEffect } from 'vue';
 import FormLoadFailureDialog from './Form/FormLoadFailureDialog.vue';
 import FormHeader from './FormHeader.vue';
 import QuestionList from './QuestionList.vue';
@@ -18,25 +26,31 @@ import QuestionStepper from './QuestionStepper.vue';
 
 const webFormsVersion = __WEB_FORMS_VERSION__;
 
-interface OdkWebFormsProps {
-	formXml: string;
-	fetchFormAttachment: FetchFormAttachment;
+export interface OdkWebFormsProps {
+	readonly formXml: string;
+	readonly fetchFormAttachment: FetchFormAttachment;
+	readonly missingResourceBehavior?: MissingResourceBehavior;
+
+	/**
+	 * Note: this parameter must be set when subscribing to the
+	 * {@link OdkWebFormEmits.submitChunked | submitChunked} event.
+	 */
+	readonly submissionMaxSize?: number;
+
+	/**
+	 * If provided by a host application, referenced instance and attachment
+	 * resources will be resolved and loaded for editing.
+	 */
+	readonly editInstance?: EditInstanceOptions;
+
+	readonly header: Boolean;
 
 	/**
 	 * Note: by default all questions will be displayed in a single list,
 	 * with collapsable groups. This param changes to a stepper layout
 	 * closer to Collect.
 	 */
-	stepperLayout?: boolean;
-
-	header: Boolean;
-	missingResourceBehavior?: MissingResourceBehavior;
-
-	/**
-	 * Note: this parameter must be set when subscribing to the
-	 * {@link OdkWebFormEmits.submitChunked | submitChunked} event.
-	 */
-	submissionMaxSize?: number;
+	readonly stepperLayout?: boolean;
 }
 
 const props = withDefaults(defineProps<OdkWebFormsProps>(), {
@@ -46,11 +60,30 @@ const props = withDefaults(defineProps<OdkWebFormsProps>(), {
 // default header to true
 const { header = true } = props;
 
+const hostSubmissionResultCallbackFactory = (
+	currentState: FormStateSuccessResult
+): HostSubmissionResultCallback => {
+	const handleHostSubmissionResult = async (
+		hostResult: OptionalAwaitableHostSubmissionResult
+	): Promise<void> => {
+		const submissionResult = await hostResult;
+
+		state.value = updateSubmittedFormState(submissionResult, currentState);
+	};
+
+	return (hostResult) => {
+		void handleHostSubmissionResult(hostResult);
+	};
+};
+
 // eslint-disable-next-line @typescript-eslint/consistent-type-definitions -- evidently a type must be used for this to be assigned to a name (which we use!); as an interface, it won't satisfy the `Record` constraint of `defineEmits`.
 type OdkWebFormEmits = {
 	odkForm: [odkForm: RootNode];
-	submit: [submissionPayload: MonolithicSubmissionResult];
-	submitChunked: [submissionPayload: ChunkedSubmissionResult];
+	submit: [submissionPayload: MonolithicInstancePayload, callback: HostSubmissionResultCallback];
+	submitChunked: [
+		submissionPayload: ChunkedInstancePayload,
+		callback: HostSubmissionResultCallback,
+	];
 };
 
 /**
@@ -64,7 +97,7 @@ type OdkWebFormEmits = {
  * {@link computed} function body (or any function body), but produces the
  * expected value assigned to a top level value as it is here.
  */
-const instance = getCurrentInstance();
+const componentInstance = getCurrentInstance();
 
 type OdkWebFormEmitsEventType = keyof OdkWebFormEmits;
 
@@ -83,24 +116,25 @@ type EventKey = `on${Capitalize<OdkWebFormEmitsEventType>}`;
 
 /**
  * @see {@link https://mokkapps.de/vue-tips/check-if-component-has-event-listener-attached}
- * @see {@link instance}
+ * @see {@link componentInstance}
  * @see {@link EventKey}
  */
 const isEmitSubscribed = (eventKey: EventKey): boolean => {
-	return eventKey in (instance?.vnode.props ?? {});
+	return eventKey in (componentInstance?.vnode.props ?? {});
 };
 
-const emitSubmit = async (root: RootNode) => {
+const emitSubmit = async (currentState: FormStateSuccessResult) => {
 	if (isEmitSubscribed('onSubmit')) {
-		const payload = await root.prepareSubmission({
-			chunked: 'monolithic',
+		const payload = await currentState.root.prepareInstancePayload({
+			payloadType: 'monolithic',
 		});
+		const callback = hostSubmissionResultCallbackFactory(currentState);
 
-		emit('submit', payload);
+		emit('submit', payload, callback);
 	}
 };
 
-const emitSubmitChunked = async (root: RootNode) => {
+const emitSubmitChunked = async (currentState: FormStateSuccessResult) => {
 	if (isEmitSubscribed('onSubmitChunked')) {
 		const maxSize = props.submissionMaxSize;
 
@@ -108,16 +142,18 @@ const emitSubmitChunked = async (root: RootNode) => {
 			throw new Error('The `submissionMaxSize` prop is required for chunked submissions');
 		}
 
-		const payload = await root.prepareSubmission({
-			chunked: 'chunked',
+		const payload = await currentState.root.prepareInstancePayload({
+			payloadType: 'chunked',
 			maxSize,
 		});
+		const callback = hostSubmissionResultCallbackFactory(currentState);
 
-		emit('submitChunked', payload);
+		emit('submitChunked', payload, callback);
 	}
 };
 
 const emitOdkForm = async(root: RootNode) => {
+	console.log("calling emitOdkForm with root:", root);
 	if (isEmitSubscribed('onOdkForm')) {
 		if (root) {
 			emit('odkForm', root);
@@ -127,34 +163,32 @@ const emitOdkForm = async(root: RootNode) => {
 
 const emit = defineEmits<OdkWebFormEmits>();
 
-const odkForm = ref<RootNode>();
+const state = initializeFormState();
 const submitPressed = ref(false);
 const showSendButton = ref(props.stepperLayout ? false : true);
-const initializeFormError = ref<FormInitializationError | null>();
 
-initializeForm(props.formXml, {
-	config: {
-		fetchFormAttachment: props.fetchFormAttachment,
-		missingResourceBehavior: props.missingResourceBehavior,
-		stateFactory: reactive,
-	},
-})
-	.then((f) => {
-		odkForm.value = f;
-		emitOdkForm(f);
-	})
-	.catch((cause) => {
-		initializeFormError.value = new FormInitializationError(cause);
+
+const init = async () => {
+	state.value = await loadFormState(props.formXml, {
+		form: {
+			fetchFormAttachment: props.fetchFormAttachment,
+			missingResourceBehavior: props.missingResourceBehavior,
+		},
+		editInstance: props.editInstance ?? null,
 	});
+	emitOdkForm(state.value.root);
+};
 
-const handleSubmit = () => {
-	const root = odkForm.value;
+void init();
 
-	if (root?.validationState.violations?.length === 0) {
+const handleSubmit = (currentState: FormStateSuccessResult) => {
+	const { root } = currentState;
+
+	if (root.validationState.violations.length === 0) {
 		// eslint-disable-next-line @typescript-eslint/no-floating-promises
-		emitSubmit(root);
+		emitSubmit(currentState);
 		// eslint-disable-next-line @typescript-eslint/no-floating-promises
-		emitSubmitChunked(root);
+		emitSubmitChunked(currentState);
 	} else {
 		submitPressed.value = true;
 		document.scrollingElement?.scrollTo(0, 0);
@@ -166,7 +200,7 @@ const validationErrorMessagePopover = ref<ComponentPublicInstance | null>(null);
 provide('submitPressed', submitPressed);
 
 const validationErrorMessage = computed(() => {
-	const violationLength = odkForm.value!.validationState.violations.length;
+	const violationLength = state.value.root?.validationState.violations.length ?? 0;
 
 	// TODO: translations
 	if (violationLength === 0) return '';
@@ -193,47 +227,46 @@ watchEffect(() => {
 	<div
 		:class="{
 			'form-initialization-status': true,
-			loading: odkForm == null && initializeFormError == null,
-			error: initializeFormError != null,
-			ready: odkForm != null,
+			loading: state.status === 'FORM_STATE_LOADING',
+			error: state.status === 'FORM_STATE_FAILURE',
+			ready: state.status === 'FORM_STATE_SUCCESS',
 		}"
 	/>
 
-	<template v-if="initializeFormError != null">
+	<template v-if="state.status === 'FORM_STATE_FAILURE'">
 		<FormLoadFailureDialog
 			severity="error"
-			:error="initializeFormError"
+			:error="state.error"
 		/>
 	</template>
 
 	<div
-		v-else-if="odkForm"
+		v-else-if="state.status === 'FORM_STATE_SUCCESS'"
 		class="odk-form"
 		:class="{ 'submit-pressed': submitPressed }"
 	>
 		<div class="form-wrapper">
 			<div v-show="submitPressed && validationErrorMessage" class="error-banner-placeholder" />
-			<PrimeMessage ref="validationErrorMessagePopover" popover="manual" severity="error" icon="icon-error_outline" class="form-error-message" :closable="false">
+			<Message ref="validationErrorMessagePopover" popover="manual" severity="error" icon="icon-error_outline" class="form-error-message" :closable="false">
 				{{ validationErrorMessage }}
-			</PrimeMessage>
+			</Message>
 
-			<FormHeader :form="odkForm" v-if="header" />
+			<FormHeader :form="state.root" v-if="header" />
 
 			<Card class="questions-card">
 				<template #content>
 					<div class="form-questions">
 						<div class="flex flex-column gap-2">
-							<QuestionList v-if="!stepperLayout" :nodes="odkForm.currentState.children" />
+							<QuestionList v-if="!stepperLayout" :nodes="state.root.currentState.children" />
 							<!-- Note that QuestionStepper has the 'Send' button integrated instead of using the button below -->
-							<QuestionStepper v-if="stepperLayout" :nodes="odkForm.currentState.children" @sendFormFromStepper="handleSubmit()" />
+							<QuestionStepper v-if="stepperLayout" :nodes="state.root.currentState.children" @sendFormFromStepper="handleSubmit(state)" />
 						</div>
 					</div>
 				</template>
 			</Card>
 
 			<div v-if="showSendButton" class="footer flex justify-content-end flex-wrap gap-3">
-				<!-- maybe current state is in odkForm.state.something -->
-				<Button label="Send" rounded @click="handleSubmit()" />
+				<Button label="Send" @click="handleSubmit(state)" />
 			</div>
 		</div>
 
@@ -257,7 +290,7 @@ watchEffect(() => {
 </template>
 
 <style scoped lang="scss">
-@import 'primeflex/core/_variables.scss';
+@use 'primeflex/core/_variables.scss' as pf;
 
 .form-initialization-status {
 	display: none;
@@ -265,7 +298,7 @@ watchEffect(() => {
 
 .odk-form {
 	width: 100%;
-	color: var(--text-color);
+	color: var(--odk-text-color);
 	--wf-error-banner-gap: 4rem;
 	--wf-max-form-width: 900px;
 
@@ -274,29 +307,29 @@ watchEffect(() => {
 		flex-direction: column;
 		max-width: var(--wf-max-form-width);
 		min-height: calc(100vh - 5.5rem);
-		min-height: calc(100dvh - 5.5rem);
 		margin: auto;
 		padding-top: 10px;
 
 		.questions-card {
-			border-radius: 10px;
+			border-radius: var(--odk-radius);
 			box-shadow: none;
 			border-top: none;
 			margin-top: 20px;
+		}
 
-			:deep(.p-card-content) {
-				padding: 0;
-			}
+		.questions-card > :deep(.p-card-body) {
+			padding: 2rem;
 		}
 
 		.error-banner-placeholder {
-			height: calc(var(--wf-error-banner-gap) + 1rem);
+			height: var(--wf-error-banner-gap);
 		}
 
 		.form-error-message.p-message.p-message-error {
-			border-radius: 10px;
-			background-color: var(--error-bg-color);
-			border: 1px solid var(--error-text-color);
+			border-radius: var(--odk-radius);
+			background-color: var(--odk-error-background-color);
+			border: 1px solid var(--p-message-error-border-color);
+			outline: none;
 			max-width: var(--wf-max-form-width);
 			width: 100%;
 			margin: 0rem auto 1rem auto;
@@ -333,8 +366,8 @@ watchEffect(() => {
 		margin-left: 0.5rem;
 
 		.anchor {
-			color: var(--gray-500);
-			font-size: 0.85rem;
+			color: var(--odk-muted-text-color);
+			font-size: var(--odk-hint-font-size);
 			font-weight: 300;
 			text-decoration: none;
 			margin-left: 1rem;
@@ -354,12 +387,12 @@ watchEffect(() => {
 		.version {
 			font-size: 0.7rem;
 			margin: 0.5rem 0 0 0.85rem;
-			color: var(--gray-500);
+			color: var(--odk-muted-text-color);
 		}
 	}
 }
 
-@media screen and (max-width: #{$lg - 1}) {
+@media screen and (max-width: #{pf.$lg - 1}) {
 	.odk-form {
 		.form-wrapper {
 			max-width: unset;
@@ -399,20 +432,29 @@ watchEffect(() => {
 		}
 	}
 }
+
+@media screen and (max-width: #{pf.$sm}) {
+	.odk-form .form-wrapper .questions-card > :deep(.p-card-body) {
+		padding: 2rem 0.5rem;
+	}
+}
 </style>
 
 <style lang="scss">
-@import 'primeflex/core/_variables.scss';
+@use 'primeflex/core/_variables.scss' as pf;
 :root {
-	--breakpoint-lg: #{$lg};
+	// This variable is used to assert the breakpoint from PrimeFlex are loaded
+	// {@link https://github.com/getodk/web-forms/blob/main/packages/web-forms/e2e/test-cases/build/style.test.ts}
+	--odk-test-breakpoint-lg: #{pf.$lg};
 }
 
 body {
-	background: var(--gray-200);
+	background: var(--odk-muted-background-color);
 }
-@media screen and (max-width: #{$lg - 1}) {
+
+@media screen and (max-width: #{pf.$lg - 1}) {
 	body {
-		background: white;
+		background: var(--odk-base-background-color);
 	}
 }
 </style>
