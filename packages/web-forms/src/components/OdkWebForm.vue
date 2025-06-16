@@ -51,10 +51,13 @@ export interface OdkWebFormsProps {
 	 * closer to Collect.
 	 */
 	readonly stepperLayout?: boolean;
+
+	readonly disableUploadImagePreview: boolean;
 }
 
 const props = withDefaults(defineProps<OdkWebFormsProps>(), {
 	stepperLayout: false,
+	disableUploadImagePreview: false,
 });
 
 // default header to true
@@ -198,6 +201,7 @@ const handleSubmit = (currentState: FormStateSuccessResult) => {
 const validationErrorMessagePopover = ref<ComponentPublicInstance | null>(null);
 
 provide('submitPressed', submitPressed);
+provide('disableUploadImagePreview', props.disableUploadImagePreview);
 
 const validationErrorMessage = computed(() => {
 	const violationLength = state.value.root?.validationState.violations.length ?? 0;

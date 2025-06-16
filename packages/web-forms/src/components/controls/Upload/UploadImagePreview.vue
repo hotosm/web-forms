@@ -3,12 +3,14 @@ import type { ObjectURL } from '@getodk/common/lib/web-compat/url.ts';
 import { createObjectURL, revokeObjectURL } from '@getodk/common/lib/web-compat/url.ts';
 import type { UploadNode } from '@getodk/xforms-engine';
 import Button from 'primevue/button';
-import { computed, ref, triggerRef, watchEffect } from 'vue';
+import { computed, ref, triggerRef, watchEffect, inject } from 'vue';
 
 export interface UploadImagePreviewProps {
 	readonly question: UploadNode;
 	readonly isDisabled: boolean;
 }
+
+const disableUploadImagePreview = inject<boolean>('disableUploadImagePreview', false);
 
 const props = defineProps<UploadImagePreviewProps>();
 
@@ -50,6 +52,8 @@ const isSmallImage = computed(() => {
 	return naturalWidth < SMALL_IMAGE_SIZE && naturalHeight < SMALL_IMAGE_SIZE;
 });
 
+const imageName = computed(() => props.question.currentState.value?.name);
+
 const imageURL = computed((previous: ObjectURL | null = null) => {
 	if (previous != null) {
 		revokeObjectURL(previous);
@@ -74,7 +78,10 @@ watchEffect(() => {
 </script>
 
 <template>
-	<div v-if="imageURL" class="preview-captured-image" :class="{ 'small-image': isSmallImage }">
+	<div v-if="disableUploadImagePreview">
+		<span v-text="imageName"></span>
+	</div>
+	<div v-else-if="imageURL" class="preview-captured-image" :class="{ 'small-image': isSmallImage }">
 		<Button v-if="!isDisabled" severity="secondary" outlined class="clear-button" @click="emit('clear')">
 			<svg
 				xmlns="http://www.w3.org/2000/svg"
