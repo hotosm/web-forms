@@ -68,16 +68,26 @@ const copyConfigFile = viteStaticCopy({
 export default defineConfig(({ mode }) => {
 	const isVueBundled = mode === 'demo';
 	const isDev = mode === 'development';
+	const isWebComponent = mode === 'web-component';
 
 	let lib: LibraryOptions | undefined;
 	let external: string[];
 	let globals: Record<string, string>;
+	let publicDir: string | false = 'public';
 	const extraPlugins: PluginOption[] = [];
 
 	if (isVueBundled) {
 		external = [];
 		globals = {};
 		extraPlugins.push(copyConfigFile);
+	} else if (isWebComponent) {
+		lib = {
+			formats: ['es'],
+			entry: resolve(__dirname, 'src/index.wc.ts'),
+			name: 'OdkWebForms',
+			fileName: 'odk-web-form',
+		};
+		publicDir = false;		
 	} else {
 		external = ['vue'];
 		globals = { vue: 'Vue' };
@@ -97,6 +107,7 @@ export default defineConfig(({ mode }) => {
 	return {
 		define: {
 			__WEB_FORMS_VERSION__: `"v${currentVersion}"`,
+			'process.env': {},
 		},
 		base: './',
 		plugins: [vue(), vueJsx(), cssInjectedByJsPlugin(), ...extraPlugins],
@@ -110,6 +121,10 @@ export default defineConfig(({ mode }) => {
 				'./fonts': resolve('../../node_modules/@fontsource/roboto'),
 			},
 		},
+		server: {
+			host: true,
+			port: 3221,
+		},		
 		build: {
 			target: 'esnext',
 			/**
@@ -157,6 +172,7 @@ export default defineConfig(({ mode }) => {
 			include: ['vue'],
 			entries: [resolve(__dirname, '../../node_modules/vue/dist/vue.esm-bundler.js')],
 		},
+		publicDir,
 		test: {
 			browser: {
 				enabled: BROWSER_ENABLED,

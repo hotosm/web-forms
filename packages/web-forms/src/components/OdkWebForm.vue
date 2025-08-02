@@ -24,6 +24,7 @@ import { computed, getCurrentInstance, provide, readonly, ref, watchEffect } fro
 import FormLoadFailureDialog from '@/components/FormLoadFailureDialog.vue';
 import FormHeader from '@/components/form-layout/FormHeader.vue';
 import QuestionList from '@/components/form-layout/QuestionList.vue';
+import QuestionStepper from './QuestionStepper.vue';
 
 const webFormsVersion = __WEB_FORMS_VERSION__;
 
@@ -43,9 +44,22 @@ export interface OdkWebFormsProps {
 	 * resources will be resolved and loaded for editing.
 	 */
 	readonly editInstance?: EditInstanceOptions;
+
+	readonly header?: boolean;
+	/**
+	 * Note: by default all questions will be displayed in a single list,
+	 * with collapsable groups. This param changes to a stepper layout
+	 * closer to Collect.
+	 */
+	readonly stepperLayout?: boolean;
+	readonly disableUploadImagePreview: boolean;
 }
 
-const props = defineProps<OdkWebFormsProps>();
+const props = withDefaults(defineProps<OdkWebFormsProps>(), {
+	header: true,
+	stepperLayout: false,
+	disableUploadImagePreview: false,
+});
 
 const hostSubmissionResultCallbackFactory = (
 	currentState: FormStateSuccessResult
@@ -65,6 +79,7 @@ const hostSubmissionResultCallbackFactory = (
 
 // eslint-disable-next-line @typescript-eslint/consistent-type-definitions -- evidently a type must be used for this to be assigned to a name (which we use!); as an interface, it won't satisfy the `Record` constraint of `defineEmits`.
 type OdkWebFormEmits = {
+	odkForm: [odkForm: RootNode];
 	submit: [submissionPayload: MonolithicInstancePayload, callback: HostSubmissionResultCallback];
 	submitChunked: [
 		submissionPayload: ChunkedInstancePayload,
@@ -138,6 +153,14 @@ const emitSubmitChunked = async (currentState: FormStateSuccessResult) => {
 	}
 };
 
+const emitOdkForm = async(root: RootNode) => {
+	if (isEmitSubscribed('onOdkForm')) {
+		if (root) {
+			emit('odkForm', root);
+		}
+	}
+}
+
 const emit = defineEmits<OdkWebFormEmits>();
 
 const formOptions = readonly<FormOptions>({
@@ -149,6 +172,7 @@ provide('imageCache', new Map<JRResourceURLString, ObjectURL>());
 
 const state = initializeFormState();
 const submitPressed = ref(false);
+const showSendButton = ref(props.stepperLayout ? false : true);
 const floatingErrorActive = ref(false);
 const showValidationError = ref(false);
 
@@ -157,6 +181,7 @@ const init = async () => {
 		form: formOptions,
 		editInstance: props.editInstance ?? null,
 	});
+	emitOdkForm(state.value.root);
 };
 
 void init();
@@ -178,6 +203,7 @@ const handleSubmit = (currentState: FormStateSuccessResult) => {
 };
 
 provide('submitPressed', submitPressed);
+provide('disableUploadImagePreview', props.disableUploadImagePreview);
 
 const validationErrorMessage = computed(() => {
 	const violationLength = state.value.root?.validationState.violations.length ?? 0;
@@ -233,24 +259,26 @@ watchEffect(() => {
 				<span>{{ validationErrorMessage }}</span>
 			</Message>
 
-			<FormHeader :form="state.root" />
+			<FormHeader :form="state.root" v-if="props.header" />
 
 			<Card class="questions-card">
 				<template #content>
 					<div class="form-questions">
 						<div class="flex flex-column gap-2">
-							<QuestionList :nodes="state.root.currentState.children" />
+							<QuestionList v-if="!stepperLayout" :nodes="state.root.currentState.children" />
+							<!-- Note that QuestionStepper has the 'Send' button integrated instead of using the button below -->
+							<QuestionStepper v-if="stepperLayout" :nodes="state.root.currentState.children" @sendFormFromStepper="handleSubmit(state)" />
 						</div>
 					</div>
 				</template>
 			</Card>
 
-			<div class="footer flex justify-content-end flex-wrap gap-3">
+			<div v-if="showSendButton" class="footer flex justify-content-end flex-wrap gap-3">
 				<Button label="Send" @click="handleSubmit(state)" />
 			</div>
 		</div>
 
-		<div class="powered-by-wrapper">
+		<div v-if="showSendButton" class="powered-by-wrapper">
 			<a class="anchor" href="https://getodk.org" target="_blank">
 				<span class="caption">Powered by</span>
 				<img class="logo" src="../assets/images/odk-logo.svg" alt="ODK">

@@ -5,15 +5,18 @@ import type { ObjectURL } from '@getodk/common/lib/web-compat/url.ts';
 import { createObjectURL, revokeObjectURL } from '@getodk/common/lib/web-compat/url.ts';
 import type { UploadNode } from '@getodk/xforms-engine';
 import Button from 'primevue/button';
-import { computed } from 'vue';
+import { computed, inject } from 'vue';
 
 export interface UploadImagePreviewProps {
 	readonly question: UploadNode;
 	readonly isDisabled: boolean;
 }
+const disableUploadImagePreview = inject<boolean>('disableUploadImagePreview', false);
 
 defineEmits(['clear']);
 const props = defineProps<UploadImagePreviewProps>();
+
+const imageName = computed(() => props.question.currentState.value?.name);
 
 const imageURL = computed((previous: ObjectURL | null = null) => {
 	if (previous != null) {
@@ -34,8 +37,11 @@ const imageURL = computed((previous: ObjectURL | null = null) => {
 		<Button v-if="!isDisabled" severity="secondary" outlined class="clear-button" @click="$emit('clear')">
 			<IconSVG name="mdiClose" variant="muted" size="sm" />
 		</Button>
+		<div v-if="disableUploadImagePreview">
+			<span v-text="imageName"></span>
+		</div>		
 		<!-- TODO Add form edit support. Ref: https://github.com/getodk/web-forms/issues/392 -->
-		<ImageBlock :blob-url="imageURL" alt="Captured image preview" />
+		<ImageBlock v-else-if="imageURL" :blob-url="imageURL" alt="Captured image preview" />
 	</div>
 </template>
 
