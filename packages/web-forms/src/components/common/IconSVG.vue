@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { computed } from 'vue';
 import {
 	mdiAlert,
 	mdiAlertCircleOutline,
 	mdiCamera,
 	mdiCheck,
 	mdiChevronDown,
+	mdiChevronLeft,
+	mdiChevronRight,
 	mdiChevronUp,
 	mdiClose,
+	mdiCloudUpload,
 	mdiDotsVertical,
 	mdiDownload,
 	mdiDragVertical,
@@ -23,6 +25,7 @@ import {
 	mdiUpload,
 	mdiWeb,
 } from '@mdi/js';
+import { computed } from 'vue';
 
 // Find icons here: https://pictogrammers.com/library/mdi/
 const iconMap: Record<string, string> = {
@@ -31,8 +34,11 @@ const iconMap: Record<string, string> = {
 	mdiCamera,
 	mdiCheck,
 	mdiChevronDown,
+	mdiChevronLeft,
+	mdiChevronRight,
 	mdiChevronUp,
 	mdiClose,
+	mdiCloudUpload,
 	mdiDotsVertical,
 	mdiDownload,
 	mdiDragVertical,
@@ -51,7 +57,7 @@ const iconMap: Record<string, string> = {
 
 type IconName = keyof typeof iconMap;
 type IconVariant = 'base' | 'error' | 'inverted' | 'muted' | 'primary' | 'warning';
-type IconSize = 'md' | 'sm';
+type IconSize = 'lg' | 'md' | 'sm';
 
 /**
  * Defines the icon's display and appearance.
@@ -130,4 +136,23 @@ const iconSize = computed(() => props.size ?? 'md');
 		transform: translate(-2px, -2px);
 	}
 }
+
+.odk-icon.odk-icon-lg {
+	height: 20px;
+	width: 20px;
+	transform: scale(1.5);
+
+	path {
+		transform: translate(-2px, -2px);
+	}
+}
+
+.p-button .odk-icon.odk-icon-lg path {
+	fill: var(--p-button-primary-color);
+}
+
+.p-button-outlined .odk-icon.odk-icon-lg path {
+	fill: var(--p-button-outlined-primary-color);
+}
+
 </style>
